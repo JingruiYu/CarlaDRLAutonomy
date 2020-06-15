@@ -1,123 +1,236 @@
 from carla_tools import *
 
-# ==============================================================================
-# -- Game Loop ---------------------------------------------------------
-# ==============================================================================
+import time
+import gym
+from gym import spaces
 
 
-def step(args):
-    """ Main loop for agent"""
 
-    pygame.init()
-    pygame.font.init()
-    world = None
-    tot_target_reached = 0
-    num_min_waypoints = 21
 
-    try:
+class environment(object):
+    def __init__(self,args):
+        self.targ_e = 40
+
+        pygame.init()
+        pygame.font.init()
         client = carla.Client(args.host, args.port)
         client.set_timeout(4.0)
-
-        display = pygame.display.set_mode(
+        self.display = pygame.display.set_mode(
             (args.width, args.height),
             pygame.HWSURFACE | pygame.DOUBLEBUF)
-
         hud = HUD(args.width, args.height)
-        world = World(client.get_world(), hud, args)
-        controller = KeyboardControl(world)
+        self.world = World(client.get_world(), hud, args)
+        
+        self.laststate = None
 
-        if args.agent == "Roaming":
-            agent = RoamingAgent(world.player)
-        elif args.agent == "Basic":
-            agent = BasicAgent(world.player)
-            spawn_point = world.map.get_spawn_points()[0]
-            agent.set_destination((spawn_point.location.x,
-                                   spawn_point.location.y,
-                                   spawn_point.location.z))
-        else:
-            agent = BehaviorAgent(world.player, behavior=args.behavior)
+        self.actDic = np.mat(' \
+            0.2, 0.0, 0.0; \
+            0.4, 0.0, 0.0; \
+            0.6, 0.0, 0.0; \
+            0.8, 0.0, 0.0; \
+            0.2,-0.2, 0.0; \
+            0.2, 0.2, 0.0; \
+            0.2,-0.4, 0.0; \
+            0.2, 0.4, 0.0; \
+            0.4,-0.2, 0.0; \
+            0.4, 0.2, 0.0; \
+            0.0, 0.0, 1.0')
+        self.action_space = spaces.Discrete(len(self.actDic))
 
-            spawn_points = world.map.get_spawn_points()
-            random.shuffle(spawn_points)
+        self.min_x = -11.0
+        self.max_x = 0.1
+        self.min_y = -120.0
+        self.max_y = -20.0
+        # self.min_z = -0.1
+        # self.max_z = 6.29
+        self.min_vx = -0.1
+        self.max_vx = 11.0
+        self.min_vy = -0.1
+        self.max_vy = 11.0
+        # self.min_vz = -20.0
+        # self.max_vz = 20.0
 
-            if spawn_points[0].location != agent.vehicle.get_location():
-                destination = spawn_points[0].location
-            else:
-                destination = spawn_points[1].location
+        self.low_state = np.array(
+            [self.min_x, self.min_y, self.min_vx, self.min_vy], dtype=np.float32
+        )
+        self.high_state = np.array(
+            [self.max_x, self.max_y, self.max_vx, self.max_vy], dtype=np.float32
+        )
+        self.observation_space = spaces.Box(
+            low=self.low_state,
+            high=self.high_state,
+            dtype=np.float32
+        )
 
-            agent.set_destination(agent.vehicle.get_location(), destination, clean=True)
+        # self.render()
+        self.reset()
 
+    def step(self, action):
+        control = self.getAction(actionID=action)
+        self.world.player.apply_control(control)
+        time.sleep(0.2)
+
+        self.state = self.getState()
+        
+        reward = self.getReward(actionID=action)
+
+        done = self.isFinish()
+
+        success = self.isSuccess()
+
+        return self.state, reward, done, {'success':success}
+
+    def reset(self):
+        self.world.restart()
+        print('RESET!\n\n')
+
+        self.state = self.getState()
+        
+        return self.state
+
+    def render(self):
         clock = pygame.time.Clock()
 
         while True:
             clock.tick_busy_loop(60)
-            if controller.parse_events():
-                return
 
-            # As soon as the server is ready continue!
-            if not world.world.wait_for_tick(10.0):
-                continue
+            self.world.tick(clock)
+            self.world.render(self.display)
+            pygame.display.flip()
 
-            if args.agent == "Roaming" or args.agent == "Basic":
-                if controller.parse_events():
-                    return
-
-                # as soon as the server is ready continue!
-                world.world.wait_for_tick(10.0)
-
-                world.tick(clock)
-                world.render(display)
-                pygame.display.flip()
-                control = agent.run_step()
-                control.manual_gear_shift = False
-                world.player.apply_control(control)
-            else:
-                agent.update_information(world)
-
-                world.tick(clock)
-                world.render(display)
-                pygame.display.flip()
-
-                # Set new destination when target has been reached
-                if len(agent.get_local_planner().waypoints_queue) < num_min_waypoints and args.loop:
-                    agent.reroute(spawn_points)
-                    tot_target_reached += 1
-                    world.hud.notification("The target has been reached " +
-                                           str(tot_target_reached) + " times.", seconds=4.0)
-
-                elif len(agent.get_local_planner().waypoints_queue) == 0 and not args.loop:
-                    print("Target reached, mission accomplished...")
-                    break
-
-                speed_limit = world.player.get_speed_limit()
-                agent.get_local_planner().set_speed(speed_limit)
-
-                # control = agent.run_step()
-                location = world.player.get_location()
-                control = carla.VehicleControl(
-                    throttle=0.5, #self.step_T_pool[throttleID],
-                    steer=0.0, #self.step_S_pool[steerID],
-                    brake=0.0,
-                    hand_brake=False,
-                    reverse=False,
-                    manual_gear_shift=False,
-                    gear=0)
-                world.player.apply_control(control)
-                location = world.player.get_location()
-
-    finally:
-        if world is not None:
-            world.destroy()
+            self.step(14)
+     
+            # if self.world is not None:
+            #     self.world.destroy()
 
         pygame.quit()
 
+    def getReward(self, actionID=1):
+        nowdis = np.linalg.norm(np.array([self.state[0], self.state[1]]))
 
+        r_arr = -1 * nowdis
+
+        if nowdis > 40:
+            r_arr = -1 * nowdis * 1.5
+        
+        if nowdis < 20:
+            r_arr = -1 * nowdis * 0.75
+
+        if nowdis < 10:
+            r_arr = -1 * r_arr * 0.75 + 2
+        
+        if nowdis < 2:
+            r_arr = -1 * r_arr * 0.75 + 20
+
+
+        r_coll = 0
+        lx = self.world.player.get_transform().location.x
+        ly = self.world.player.get_transform().location.y
+        if (lx > self.max_x - 1 or lx < self.min_x + 1):
+            r_coll = r_coll - 100
+        
+        if ly > -30:
+            r_coll = r_coll + 10
+
+        r_near = 0
+        if self.laststate is not None:
+            lastdis = np.linalg.norm(np.array([self.laststate[0], self.laststate[1]]))
+            if lastdis > nowdis + 1:
+                r_near = 2
+
+        self.laststate = self.state
+
+        r_isrot = 0
+        if actionID > 5 and actionID < 10:
+            r_isrot = r_isrot - 5
+
+        if actionID < 5:
+            r_isrot = r_isrot + 3
+
+        reward = r_arr + r_coll + r_near + r_near - 5
+
+        return reward
+
+    def isFinish(self):
+
+        done = bool(
+            abs(self.state[0]) < 0.1
+            and abs(self.state[1]) < 0.1
+        )
+
+        lx = self.world.player.get_transform().location.x
+        ly = self.world.player.get_transform().location.y
+
+        if (lx > self.max_x):
+            done = True
+        
+        if (lx < self.min_x):
+            done = True
+        
+        if (ly > self.max_y or ly < self.min_y):
+            done = True
+
+        return done
+
+    def isSuccess(self):
+        
+        success = bool(
+            abs(self.state[0]) < 1
+            and abs(self.state[1]) < 2
+        )
+        return success
+    
+    def getState(self):
+        #tmp_state = np.array([self.world.player.get_transform().location.x, self.world.player.get_transform().location.y])
+        # t_yaw = self.ang2rot(self.world.target_point.rotation.yaw)
+        # n_yaw = self.ang2rot(self.world.player.get_transform().rotation.yaw)
+        
+        target_tranform = [
+            self.world.target_point.location.x - self.world.player.get_transform().location.x,
+            self.world.target_point.location.y - self.world.player.get_transform().location.y]
+            # t_yaw - n_yaw]
+        
+        # angular_velocity = self.world.player.get_angular_velocity()
+        velocity_world = self.world.player.get_velocity()
+
+        tmp_state = np.array([target_tranform[0], target_tranform[1], velocity_world.x, velocity_world.y])
+        
+        # tmp_state = np.array([target_tranform[0], target_tranform[1], target_tranform[2], velocity_world.x, velocity_world.y, angular_velocity.z])
+        return tmp_state
+
+    def getAction(self, actionID=4):
+        
+        if actionID > 10 or actionID < 0:
+            print(actionID)
+
+        self.control = carla.VehicleControl(
+            throttle=self.actDic[actionID,0],
+            steer=self.actDic[actionID,1],
+            brake=self.actDic[actionID,2],
+            hand_brake=False,
+            reverse=False,
+            manual_gear_shift=False,
+            gear=0)
+
+        return self.control
+
+    def get_obsdim(self):
+        return 4
+
+    def ang2rot(self,ego_yaw):
+        if ego_yaw < 0:
+            ego_yaw += 360
+        if ego_yaw > 360:
+            ego_yaw -= 360
+        ego_yaw = ego_yaw/180.0 * 3.141592653
+        
+        return ego_yaw
 # ==============================================================================
 # -- main() --------------------------------------------------------------
 # ==============================================================================
 
 
-def main():
+def getArgs():
     """Main method"""
 
     argparser = argparse.ArgumentParser(
@@ -184,9 +297,4 @@ def main():
 
     print(__doc__)
 
-    try:
-        step(args)
-
-    except KeyboardInterrupt:
-        print('\nCancelled by user. Bye!')
-
+    return args
