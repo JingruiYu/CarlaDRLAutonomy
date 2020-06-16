@@ -21,8 +21,8 @@ def experiment(variant):
     args = getArgs()
     # expl_env = NormalizedBoxEnv(environment(args))
 
-    expl_env = environment(args) 
-    eval_env = environment(args)
+    expl_env = environment(args,'dqn') 
+    eval_env = environment(args,'dqn')
     # expl_env.render()
     obs_dim = expl_env.get_obsdim()
     action_dim = expl_env.action_space.n

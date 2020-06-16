@@ -454,6 +454,7 @@ class CollisionSensor(object):
     def __init__(self, parent_actor, hud):
         """Constructor method"""
         self.sensor = None
+        self.collisionType = None
         self.history = []
         self._parent = parent_actor
         self.hud = hud
@@ -479,6 +480,7 @@ class CollisionSensor(object):
         if not self:
             return
         actor_type = get_actor_display_name(event.other_actor)
+        self.collisionType = actor_type
         self.hud.notification('Collision with %r' % actor_type)
         impulse = event.normal_impulse
         intensity = math.sqrt(impulse.x ** 2 + impulse.y ** 2 + impulse.z ** 2)

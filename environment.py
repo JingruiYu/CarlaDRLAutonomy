@@ -8,8 +8,9 @@ from gym import spaces
 
 
 class environment(object):
-    def __init__(self,args):
+    def __init__(self,args,model='sac'):
         self.targ_e = 40
+        self.model = model
 
         pygame.init()
         pygame.font.init()
@@ -23,19 +24,24 @@ class environment(object):
         
         self.laststate = None
 
-        self.actDic = np.mat(' \
-            0.2, 0.0, 0.0; \
-            0.4, 0.0, 0.0; \
-            0.6, 0.0, 0.0; \
-            0.8, 0.0, 0.0; \
-            0.2,-0.2, 0.0; \
-            0.2, 0.2, 0.0; \
-            0.2,-0.4, 0.0; \
-            0.2, 0.4, 0.0; \
-            0.4,-0.2, 0.0; \
-            0.4, 0.2, 0.0; \
-            0.0, 0.0, 1.0')
-        self.action_space = spaces.Discrete(len(self.actDic))
+        if self.model == 'dqn':
+            self.actDic = np.mat(' \
+                0.2, 0.0, 0.0; \
+                0.4, 0.0, 0.0; \
+                0.6, 0.0, 0.0; \
+                0.8, 0.0, 0.0; \
+                0.2,-0.2, 0.0; \
+                0.2, 0.2, 0.0; \
+                0.2,-0.4, 0.0; \
+                0.2, 0.4, 0.0; \
+                0.4,-0.2, 0.0; \
+                0.4, 0.2, 0.0; \
+                0.0, 0.0, 1.0')
+            self.action_space = spaces.Discrete(len(self.actDic))
+        elif self.model == 'sac':
+            self.action_bound = [-1, 1]
+            self.action_dim = 3
+            self.action_space= spaces.Box(low=-1,high=1,shape=[self.action_dim])
 
         self.min_x = -11.0
         self.max_x = 0.1
@@ -66,13 +72,17 @@ class environment(object):
         self.reset()
 
     def step(self, action):
-        control = self.getAction(actionID=action)
+        if self.model == 'dqn':
+            control = self.getActionDQN(actionID=action)
+        elif self.model == 'sac':
+            control = self.getActionSAC(actions=action)
+        
         self.world.player.apply_control(control)
         time.sleep(0.2)
 
         self.state = self.getState()
         
-        reward = self.getReward(actionID=action)
+        reward = self.getReward(action)
 
         done = self.isFinish()
 
@@ -105,7 +115,7 @@ class environment(object):
 
         pygame.quit()
 
-    def getReward(self, actionID=1):
+    def getReward(self, actions):
         nowdis = np.linalg.norm(np.array([self.state[0], self.state[1]]))
 
         r_arr = -1 * nowdis
@@ -141,17 +151,31 @@ class environment(object):
         self.laststate = self.state
 
         r_isrot = 0
-        if actionID > 5 and actionID < 10:
-            r_isrot = r_isrot - 5
-
-        if actionID < 5:
-            r_isrot = r_isrot + 3
+        if self.model == 'dqn':
+            if actions > 5 and actions < 10:
+                r_isrot = r_isrot - 5
+            if actions < 5:
+                r_isrot = r_isrot + 3
+        elif self.model == 'sac':
+            if abs(actions[1]) > 0.5:
+                r_isrot = r_isrot - 5
+            if abs(actions[1]) < 0.1:
+                r_isrot = r_isrot + 3
 
         reward = r_arr + r_coll + r_near + r_near - 5
 
         return reward
 
     def isFinish(self):
+        collision = False
+        colTpye = self.world.collision_sensor.collisionType
+        colDic = ['Pole'] 
+        typDic = ['Sidewalk','Pole']
+        if colTpye is not None and colTpye not in colDic:
+            collision = True
+
+        if colTpye is not None and colTpye not in typDic:
+            print(colTpye)
 
         done = bool(
             abs(self.state[0]) < 0.1
@@ -170,7 +194,12 @@ class environment(object):
         if (ly > self.max_y or ly < self.min_y):
             done = True
 
-        return done
+        finish = False
+
+        if done or collision:
+            finish = True
+
+        return finish
 
     def isSuccess(self):
         
@@ -198,7 +227,7 @@ class environment(object):
         # tmp_state = np.array([target_tranform[0], target_tranform[1], target_tranform[2], velocity_world.x, velocity_world.y, angular_velocity.z])
         return tmp_state
 
-    def getAction(self, actionID=4):
+    def getActionDQN(self, actionID=4):
         
         if actionID > 10 or actionID < 0:
             print(actionID)
@@ -207,6 +236,24 @@ class environment(object):
             throttle=self.actDic[actionID,0],
             steer=self.actDic[actionID,1],
             brake=self.actDic[actionID,2],
+            hand_brake=False,
+            reverse=False,
+            manual_gear_shift=False,
+            gear=0)
+
+        return self.control
+
+    def getActionSAC(self, actions):
+        a_t = (actions[0] + 1) * 0.5
+        a_s = actions[1] * 1.0
+        a_b = 0.0
+        if actions[2] > 0.8:
+            a_b = 1.0
+
+        self.control = carla.VehicleControl(
+            throttle=a_t,
+            steer=a_s,
+            brake=a_b,
             hand_brake=False,
             reverse=False,
             manual_gear_shift=False,
