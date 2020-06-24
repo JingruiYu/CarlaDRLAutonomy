@@ -1,5 +1,7 @@
 from environment import *
 
+import torch
+
 import rlkit.torch.pytorch_util as ptu
 from rlkit.data_management.env_replay_buffer import EnvReplayBuffer
 from rlkit.envs.wrappers import NormalizedBoxEnv
@@ -44,6 +46,12 @@ def experiment(variant):
         action_dim=action_dim,
         hidden_sizes=[M, M],
     )
+
+    # trainedfile = '/home/yujr/rlkit/data/SAC/SAC_2020_06_22_08_48_29_0000--s-0/params.pkl'
+    # data = torch.load(trainedfile)
+    # print("data loaded", data['evaluation/policy'])
+    # policy = data['evaluation/policy'].stochastic_policy
+
     eval_policy = MakeDeterministic(policy)
     eval_path_collector = MdpPathCollector(
         eval_env,

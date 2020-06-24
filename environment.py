@@ -11,6 +11,8 @@ class environment(object):
     def __init__(self,args,model='sac'):
         self.targ_e = 40
         self.model = model
+        self.colDic = ['Pole','Unknown'] 
+        self.typDic = ['Sidewalk','Pole','Unknown','Road']
 
         pygame.init()
         pygame.font.init()
@@ -70,6 +72,7 @@ class environment(object):
 
         # self.render()
         self.reset()
+        self.world.world.set_weather(carla.WeatherParameters.ClearNoon)
 
     def step(self, action):
         if self.model == 'dqn':
@@ -82,11 +85,15 @@ class environment(object):
 
         self.state = self.getState()
         
-        reward = self.getReward(action)
-
         done = self.isFinish()
 
+        reward = self.getReward(action)
+        print('reward:',reward, ' state:',self.state[0],' ',self.state[1],' ',self.state[2],' ',self.state[3] )
+
         success = self.isSuccess()
+
+        if success:
+            reward = reward + 500
 
         return self.state, reward, done, {'success':success}
 
@@ -117,20 +124,23 @@ class environment(object):
 
     def getReward(self, actions):
         nowdis = np.linalg.norm(np.array([self.state[0], self.state[1]]))
-
-        r_arr = -1 * nowdis
-
+        
+        r_arr = -8
+        #changzhi
         if nowdis > 40:
-            r_arr = -1 * nowdis * 1.5
+            r_arr = -20
         
-        if nowdis < 20:
-            r_arr = -1 * nowdis * 0.75
+        if nowdis < 40 and nowdis > 35:
+            r_arr = -8
 
-        if nowdis < 10:
-            r_arr = -1 * r_arr * 0.75 + 2
+        if nowdis < 35 and nowdis > 20:
+            r_arr = -4
+                
+        if nowdis < 20:
+            r_arr = 10
         
-        if nowdis < 2:
-            r_arr = -1 * r_arr * 0.75 + 20
+        if nowdis < 5:
+            r_arr = 100
 
 
         r_coll = 0
@@ -140,13 +150,24 @@ class environment(object):
             r_coll = r_coll - 100
         
         if ly > -30:
-            r_coll = r_coll + 10
+            r_coll = r_coll - 30
+
+        colTpye = self.world.collision_sensor.collisionType
+        if colTpye in self.colDic:
+            r_coll = r_coll - 80
+
+        stop = 1
+        if self.laststate is not None:
+            stop = np.linalg.norm(np.array([self.state[0] - self.laststate[0], self.state[1] - self.laststate[1]]))
+
+        if colTpye == 'Sidewalk' and stop == 0:
+            r_coll = r_coll - 40
 
         r_near = 0
         if self.laststate is not None:
             lastdis = np.linalg.norm(np.array([self.laststate[0], self.laststate[1]]))
             if lastdis > nowdis + 1:
-                r_near = 2
+                r_near = 10
 
         self.laststate = self.state
 
@@ -155,31 +176,37 @@ class environment(object):
             if actions > 5 and actions < 10:
                 r_isrot = r_isrot - 5
             if actions < 5:
-                r_isrot = r_isrot + 3
+                r_isrot = r_isrot + 4
         elif self.model == 'sac':
             if abs(actions[1]) > 0.5:
                 r_isrot = r_isrot - 5
-            if abs(actions[1]) < 0.1:
-                r_isrot = r_isrot + 3
+            if abs(actions[1]) < 0.1 and abs(actions[0]) > 0.1:
+                r_isrot = r_isrot + 7
 
-        reward = r_arr + r_coll + r_near + r_near - 5
+        reward = r_arr + r_coll + r_near + r_isrot - 10
 
         return reward
 
     def isFinish(self):
         collision = False
         colTpye = self.world.collision_sensor.collisionType
-        colDic = ['Pole'] 
-        typDic = ['Sidewalk','Pole']
-        if colTpye is not None and colTpye not in colDic:
+        
+        if colTpye in self.colDic:
             collision = True
 
-        if colTpye is not None and colTpye not in typDic:
+        if colTpye is not None and colTpye not in self.typDic:
             print(colTpye)
 
+        stop = 1
+        if self.laststate is not None:
+            stop = np.linalg.norm(np.array([self.state[0] - self.laststate[0], self.state[1] - self.laststate[1]]))
+
+        if colTpye == 'Sidewalk' and stop == 0:
+            collision = True
+
         done = bool(
-            abs(self.state[0]) < 0.1
-            and abs(self.state[1]) < 0.1
+            abs(self.state[0]) < 2
+            and abs(self.state[1]) < 2
         )
 
         lx = self.world.player.get_transform().location.x
@@ -204,7 +231,7 @@ class environment(object):
     def isSuccess(self):
         
         success = bool(
-            abs(self.state[0]) < 1
+            abs(self.state[0]) < 2
             and abs(self.state[1]) < 2
         )
         return success
