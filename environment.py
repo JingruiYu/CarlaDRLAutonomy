@@ -74,7 +74,12 @@ class environment(object):
         self.reset()
         self.world.world.set_weather(carla.WeatherParameters.ClearNoon)
 
+        self.stepNum = 0
+        self.stopTime = 0
+
     def step(self, action):
+        self.stepNum = self.stepNum + 1
+
         if self.model == 'dqn':
             control = self.getActionDQN(actionID=action)
         elif self.model == 'sac':
@@ -84,23 +89,25 @@ class environment(object):
         time.sleep(0.2)
 
         self.state = self.getState()
-        
-        done = self.isFinish()
+
+        self.isSuccess()
+
+        finish = self.isFinish()
 
         reward = self.getReward(action)
-        print('reward:',reward, ' state:',self.state[0],' ',self.state[1],' ',self.state[2],' ',self.state[3] )
+        print('step: ', self.stepNum,' reward:',reward, ' state:',self.state[0],' ',self.state[1],' ',self.state[2],' ',self.state[3] )
 
-        success = self.isSuccess()
+        self.laststate = self.state
 
-        if success:
-            reward = reward + 500
-
-        return self.state, reward, done, {'success':success}
+        return self.state, reward, finish, {'success':self.success}
 
     def reset(self):
         self.world.restart()
         print('RESET!\n\n')
 
+        self.stepNum = 0
+        self.stopTime = 0
+        
         self.state = self.getState()
         
         return self.state
@@ -125,74 +132,16 @@ class environment(object):
     def getReward(self, actions):
         nowdis = np.linalg.norm(np.array([self.state[0], self.state[1]]))
         
-        r_arr = -8
-        #changzhi
-        if nowdis > 40:
-            r_arr = -20
-        
-        if nowdis < 40 and nowdis > 35:
-            r_arr = -8
-
-        if nowdis < 35 and nowdis > 20:
-            r_arr = -4
-                
-        if nowdis < 20:
-            r_arr = 10
-        
-        if nowdis < 5:
-            r_arr = 100
-
-
-        r_coll = 0
-        lx = self.world.player.get_transform().location.x
-        ly = self.world.player.get_transform().location.y
-        if (lx > self.max_x - 1 or lx < self.min_x + 1):
-            r_coll = r_coll - 100
-        
-        if ly > -30:
-            r_coll = r_coll - 30
-
-        colTpye = self.world.collision_sensor.collisionType
-        if colTpye in self.colDic:
-            r_coll = r_coll - 80
-
-        stop = 1
-        if self.laststate is not None:
-            stop = np.linalg.norm(np.array([self.state[0] - self.laststate[0], self.state[1] - self.laststate[1]]))
-
-        if colTpye == 'Sidewalk' and stop == 0:
-            r_coll = r_coll - 40
-
-        r_near = 0
-        if self.laststate is not None:
-            lastdis = np.linalg.norm(np.array([self.laststate[0], self.laststate[1]]))
-            if lastdis > nowdis + 1:
-                r_near = 10
-
-        self.laststate = self.state
-
-        r_isrot = 0
-        if self.model == 'dqn':
-            if actions > 5 and actions < 10:
-                r_isrot = r_isrot - 5
-            if actions < 5:
-                r_isrot = r_isrot + 4
-        elif self.model == 'sac':
-            if abs(actions[1]) > 0.5:
-                r_isrot = r_isrot - 5
-            if abs(actions[1]) < 0.1 and abs(actions[0]) > 0.1:
-                r_isrot = r_isrot + 7
-
-        reward = r_arr + r_coll + r_near + r_isrot - 10
+        reward = 100 * math.exp(-1*math.sqrt(nowdis)/(2*math.sqrt(9))) - 1.5*nowdis + 10000 * self.success - 20000 * self.collision
 
         return reward
 
     def isFinish(self):
-        collision = False
+        self.collision = False
         colTpye = self.world.collision_sensor.collisionType
         
         if colTpye in self.colDic:
-            collision = True
+            self.collision = True
 
         if colTpye is not None and colTpye not in self.typDic:
             print(colTpye)
@@ -201,40 +150,38 @@ class environment(object):
         if self.laststate is not None:
             stop = np.linalg.norm(np.array([self.state[0] - self.laststate[0], self.state[1] - self.laststate[1]]))
 
-        if colTpye == 'Sidewalk' and stop == 0:
-            collision = True
+        if stop < 1e-2:
+            self.stopTime = self.stopTime + 1
+        else:
+            self.stopTime = 0
 
-        done = bool(
-            abs(self.state[0]) < 2
-            and abs(self.state[1]) < 2
-        )
+        if colTpye == 'Sidewalk' and self.stopTime > 3:
+            self.collision = True
+
+        if self.stopTime > 50 and not self.success:
+            self.collision = True
 
         lx = self.world.player.get_transform().location.x
         ly = self.world.player.get_transform().location.y
 
         if (lx > self.max_x):
-            done = True
+            self.collision = True
         
         if (lx < self.min_x):
-            done = True
+            self.collision = True
         
         if (ly > self.max_y or ly < self.min_y):
-            done = True
+            self.collision = True
+        
+        return self.collision
 
-        finish = False
-
-        if done or collision:
-            finish = True
-
-        return finish
 
     def isSuccess(self):
         
-        success = bool(
+        self.success = bool(
             abs(self.state[0]) < 2
             and abs(self.state[1]) < 2
         )
-        return success
     
     def getState(self):
         #tmp_state = np.array([self.world.player.get_transform().location.x, self.world.player.get_transform().location.y])

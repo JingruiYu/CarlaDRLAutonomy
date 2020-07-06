@@ -11,6 +11,7 @@ from rlkit.torch.sac.policies import TanhGaussianPolicy, MakeDeterministic
 from rlkit.torch.sac.sac import SACTrainer
 from rlkit.torch.networks import FlattenMlp
 from rlkit.torch.torch_rl_algorithm import TorchBatchRLAlgorithm
+from rlkit.launchers.launcher_util import run_experiment_here
 
 
 def experiment(variant):
@@ -47,10 +48,10 @@ def experiment(variant):
         hidden_sizes=[M, M],
     )
 
-    # trainedfile = '/home/yujr/rlkit/data/SAC/SAC_2020_06_22_08_48_29_0000--s-0/params.pkl'
-    # data = torch.load(trainedfile)
-    # print("data loaded", data['evaluation/policy'])
-    # policy = data['evaluation/policy'].stochastic_policy
+    trainedfile = '/home/yujr/rlkit/data/SAC/3.0/params.pkl'
+    data = torch.load(trainedfile)
+    print("data loaded", data['evaluation/policy'])
+    policy = data['evaluation/policy'].stochastic_policy
 
     eval_policy = MakeDeterministic(policy)
     eval_path_collector = MdpPathCollector(
@@ -97,12 +98,12 @@ if __name__ == "__main__":
         layer_size=256,
         replay_buffer_size=int(1E6),
         algorithm_kwargs=dict(
-            num_epochs=3000,
-            num_eval_steps_per_epoch=5000,
-            num_trains_per_train_loop=1000,
+            num_epochs=300,
+            num_eval_steps_per_epoch=1000,
+            num_trains_per_train_loop=200,
             num_expl_steps_per_train_loop=1000,
-            min_num_steps_before_training=1000,
-            max_path_length=1000,
+            min_num_steps_before_training=300,
+            max_path_length=500,
             batch_size=256,
         ),
         trainer_kwargs=dict(
@@ -115,6 +116,8 @@ if __name__ == "__main__":
             use_automatic_entropy_tuning=True,
         ),
     )
-    setup_logger('SAC', variant=variant)
-    ptu.set_gpu_mode(True)  # optionally set the GPU (default=False)
-    experiment(variant)
+    # setup_logger('SAC', variant=variant)
+    # ptu.set_gpu_mode(True)  # optionally set the GPU (default=False)
+    # experiment(variant)
+    run_experiment_here(experiment,variant=variant,use_gpu=True,exp_prefix='SAC',
+    snapshot_mode='last',snapshot_gap=20)
